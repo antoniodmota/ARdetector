@@ -1,5 +1,5 @@
 #%%
-from heartrate import heart_rate# %%
+import enum
 from signal import siginterrupt
 import wfdb
 import scipy.signal as sg
@@ -13,9 +13,26 @@ import matplotlib as mpl
 import pandas as pd
 import neurokit2 as nk
 from heartrate import heart_rate
-from wfdb import processing
+import warnings
 
+from tensorflow.python.keras.models import load_model
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 
+invalid_beat = [
+    "[", "!", "]", "x", "(", ")", "p", "t",
+    "u", "`", "'", "^", "|", "~", "+", "s",
+    "T", "*", "D", "=", '"', "@"
+]
+
+abnormal_beats = [
+    "L", "R", "B", "A", "a", "J", "S", "V",
+    "r", "F", "e", "j", "n", "E", "/", "f", "Q", "?"
+]
+
+warnings.filterwarnings(action='ignore', message='Mean of empty slice.')
+warnings.filterwarnings(
+    action='ignore', message='invalid value encountered in double_scalars')
 
 def bandPass(signal):
 
@@ -109,12 +126,15 @@ def RR(r_peak):
     return np.array(RR_duration)
     
 def QRS(waves):
+
     post_p = np.array(waves["ECG_R_Onsets"])
     pre_t = np.array(waves["ECG_R_Offsets"])
     qrs_duration = pre_t - post_p
+
     return qrs_duration
 
 def STsegment(waves):
+
     post_q = np.array(waves["ECG_R_Offsets"])
     pre_t = np.array(waves["ECG_T_Onsets"])
     st_segment = pre_t - post_q
@@ -122,127 +142,348 @@ def STsegment(waves):
     return st_segment
 
 def STinterval(waves):
+
     post_q = np.array(waves["ECG_R_Offsets"])
     post_t = np.array(waves["ECG_T_Offsets"])
     st_interval = post_t - post_q
 
     return st_interval
 
+def PRsegment(waves):
 
-#ajustamos el tamaño de la gráfica
+    post_p = np.array(waves["ECG_P_Offsets"])
+    pre_q = np.array(waves["ECG_R_Onsets"])
+    prsg = pre_q - post_p
+
+    return prsg
+
+def PRinterval(waves):
+
+    pre_p = np.array(waves["ECG_P_Onsets"])
+    post_p = np.array(waves["ECG_P_Offsets"])
+    pre_q = np.array(waves["ECG_R_Onsets"])
+    p_duration = post_p - pre_p
+
+    pr_interval = PRsegment(waves) + p_duration
+    
+    return pr_interval
+
+def getSequence(signal, beat, window_sec, fs):
+    window_size = window_sec * fs
+    beat_start = beat - window_size
+    beat_end = beat + window_size
+    if beat_end < signal.shape[0]:
+        sequence = signal[beat_start:beat_end, 0]
+        return sequence.reshape(1, -1, 1)
+    else:
+        return np.array([])
+
+def classifyBeat(symbol):
+    if symbol in abnormal_beats:
+        return 1
+    elif symbol == "N" or symbol == ".":
+        return 0
+
+def build_dataset(all_sequences):
+    sequences = []
+    
+    for i in all_sequences:
+        sequences.append(i)
+
+    return np.vstack(sequences)
+
+# ajustamos el tamaño de la gráfica
 plt.rcParams['figure.figsize'] = [15, 4] 
 
-#rdsamp es un elemento de la biblioteca wfdb para leer la señal
-sig, fields = wfdb.rdsamp(
-    'sample-data/mit-bih-arrhythmia-database-1.0.0/100', sampfrom=180, sampto=4000)
+print("\n Bienvenido a ARdetector! \n")
+
+# cargamos los pacientes existentes en la bbdd
+pacient = np.loadtxt(
+    "sample-data/mit-bih-arrhythmia-database-1.0.0/RECORDS", dtype=int)
+pacient_list=list(pacient)
+pacient_input=0
+
+while pacient_input != -1 or pacient_input != -1:
+
+    print("\nIndique el paciente a leer de la base de datos entre los siguientes o indique -1 para terminar: \n", pacient_list, "\n")
+    pacient_input = int(input())
+
+    if pacient_input in pacient_list:
+        print("\nCargando paciente encontrado \n")
+
+        # rdsamp es un elemento de la biblioteca wfdb para leer la señal
+        sig, fields = wfdb.rdsamp(
+            f'sample-data/mit-bih-arrhythmia-database-1.0.0/{pacient_input}')
+
+        annotation = wfdb.rdann(
+            f'sample-data/mit-bih-arrhythmia-database-1.0.0/{pacient_input}', 'atr')
+
+        print("El total de tiempo muestreado es ",
+              fields['sig_len']/fields['fs'], " segundos")
+        print("El total de muestras es ", fields['sig_len'])
+
+        
+        # leemos la señal de inicio a fin de la primera columna
+        unfiltered_signal = sig[:, 0]
+        final_unfiltered = unfiltered_signal
+
+        # operaciones de filtrado de señal
+        filtered_ecg = bandPass(unfiltered_signal)
+        diff = differentiation(filtered_ecg)
+        sqrd = squared(diff)
+
+
+        show = 0
+        str_aux= "alguna"
+
+        while show != -1 :
+
+            print("\n¿Desea imprimir ", str_aux, " de las siguiente gráficas de filtrado de señal?, si no pulse -1\n 1)- Señal sin filtrar de ECG\n 2)- ECG filtro Paso-Banda\n 3)- Derivación de la señal\n 4)- Elevación al cuadrado\n")
+            show = int(input())   
+
+            if show == 1:
+                # cargamos el  vector a imprimir y el formato
+                plt.title("Señal sin filtrar de ECG")
+                plt.plot(final_unfiltered, 'g')
+                plt.xlabel('Samples')
+                plt.ylabel('MLIImV')
+                plt.show()
+                str_aux = "otra"
+
+            if show == 2:
+                # filtro de paso banda
+                plt.plot(filtered_ecg, 'g')
+                plt.title("ECG filtro Paso-Banda")
+                plt.xlabel('Samples')
+                plt.ylabel('MLIImV')
+                plt.show()
+                str_aux = "otra"
+
+
+            if show == 3:
+                # derivación para eliminar para elimianr olas en componentes P y T del ECG
+                plt.plot(diff, 'g')
+                plt.title("ECG tras derivacion")
+                plt.xlabel('Samples')
+                plt.ylabel('MLIImV')
+                plt.show()
+                str_aux = "otra"
+                
+            if show == 4:
+
+                # elevación al cuadrado
+                plt.plot(sqrd, 'g')
+                plt.title("ECG señal tras elevación al cuadrado")
+                plt.show()
+                str_aux = "otra"
+
+            if show != -1 and show != 1 and show != 2 and show != 3 and show != 4:
+                
+                print("\nPor favor introduzca una opción correcta\n")
+
+
+        print("\nCalulando características de la señal filtrada...\n")
+
+        # Moving Window Integration (funcion de ecg-detectors)
+        mwa = moving_window_integration(sqrd,  int(0.12 * fields['fs']))
+        mwa[: int(0.2 * fields['fs'])] = 0
+
+
+        # Procedemos a montar el detector
+        # Buscamos los picos R con la clase heartrate
+        hr = heart_rate(final_unfiltered, fields['fs'], mwa, filtered_ecg)
+        result = hr.find_r_peaks()
+        result = list(set(result))
+        result.sort()
+        result = np.array(result)
+        result = result[result > 0]
+        # Eliminamos los resultados donde la intensidad de la señal se menor que 0
+        # puesto que se corresponde con el periodo de aprendizaje del algoritmo de picos
+        for i in result:
+            if final_unfiltered[i] <= 0:
+                result = np.setdiff1d(result, i)
+
+        
+        # Se calculan los latidos
+        heartRate = (60*fields['fs'])/np.average(np.diff(result[1:]))
+        print("\nLatidos por minuto en media --> ", heartRate)
+
+        # Se calcula la duración media del QRS
+        # Pasamos a extraer el intervalo los puntos PQST utilizando la función ecg_delineate de neurokit2
+        _, waves_peak = nk.ecg_delineate(sig[0:, 0],
+                                {"ECG_R_Peaks": result},
+                                360, method="dwt")
+
+        # duracion media de QRS ---
+        qrs_duration = QRS(waves_peak)
+        np.delete(qrs_duration, qrs_duration.size -1)
+        # Se calcula la media de QRS
+        
+        qrsMean = np.nanmean(qrs_duration) / fields['fs']
+        print("\nDuración media QRS en ms --> ", qrsMean*1000)
+
+        show = 0
+
+        while show != -1:
+
+            print("\n¿Desea imprimir ", str_aux,
+                  " de las siguiente gráficas de filtrado de señal?, si no pulse -1\n \n1)- Localización de los picos R\n 2)- Puntos caracteristicos TPQS\n")
+            show = int(input())
+
+            if show == 1:
+
+                # Mostramos los picos R en la señal sin filtrar
+                plt.figure(figsize=(20, 4), dpi=100)
+                plt.xticks(np.arange(0, len(final_unfiltered)+1, 150))
+                plt.plot(final_unfiltered)
+                plt.scatter(result, final_unfiltered[result], color='red', s=50, marker='*')
+                plt.xlabel('Samples')
+                plt.ylabel('MLIImV')
+                plt.title("Localización de los picos R")
+                plt.show()
+
+            if show == 2:
+
+                # Pintamos los puntos caracteristicos TPQS
+                plot = nk.events_plot([waves_peak['ECG_T_Peaks'][:],
+                waves_peak['ECG_P_Peaks'][:],
+                waves_peak['ECG_Q_Peaks'][:],
+                waves_peak['ECG_S_Peaks'][:]], final_unfiltered[:])
+                plt.show()
+
+            if show != -1 and show != 1 and show != 2:
+
+                print("\nPor favor introduzca una opción correcta\n")
+
+        print("\nAplicamos la red neuronal CNN a la señal...")
+
+        # Calsificador cnn
+        record = wfdb.rdrecord(
+            f'sample-data/mit-bih-arrhythmia-database-1.0.0/{pacient_input}')
+        annotation = wfdb.rdann(
+            f'sample-data/mit-bih-arrhythmia-database-1.0.0/{pacient_input}', 'atr')
+
+
+        cnn = load_model('./modelo/modelo.h5')
+        cnn.load_weights('./modelo/pesos.h5')
+
+        scaler = StandardScaler()
+        signal = scaler.fit_transform(record.p_signal)
+        all_sequences = []
+        # resultados una vez quitados los que no se pueden extraer
+        final_result = []
+
+        # llamamos a crear la secuecia de latidos con los picos R extraidos
+        for i,i_sample in enumerate(result):
+            sequence = getSequence(signal, i_sample, 3, 360)
+            if sequence.size > 0:
+                all_sequences.append(sequence)
+                final_result.append(i_sample)
+
+        # contruimos la estructura de datos para informar la red cnn        
+        dataset = build_dataset(all_sequences)
+
+        # predecimos con el modelo previamente entrenado
+        arreglo = cnn.predict(dataset)
+        
+        # extraemos las posiciones dónde la probabilidad de arritmia es mayor de 0.5
+        posAR=[]
+
+        for i in arreglo:
+            if i > 0.5:
+                posAR.append(np.where(arreglo == i)[0])
+
+        print('\nLos latidos en los que se pueden encontrar anomalias son: \n')
+
+    
+        # picos r de latidos anormales
+        resultPeak = []
+        for i in posAR:
+            print('\n Latido nº', i[0], " secuencia -> ", final_result[i[0]])
+            resultPeak.append(final_result[i[0]])
 
 
 
-#leemos la señal de inicio a fin de la primera columna
-unfiltered_signal = sig[:, 0] 
-final_unfiltered = unfiltered_signal
+        if not posAR:
+            print("\nNo se observan latidos con anomalias\n")
+    
+        else:
+            
+            print("\n¿Desea imprimir la gráfica localizando los latidos irregulares? \n-1 - No\n 1 - Sí\n")
+            show = int(input())
 
-#cargamos el  vector a imprimir y el formato
-plt.title("Señal sin filtrar de ECG")
-plt.plot(unfiltered_signal, 'g') 
-plt.xlabel('Samples')
-plt.ylabel('MLIImV')
-plt.show()
+            if show == 1:
 
+                # Mostramos los picos R de los latidos anormales en la señal sin filtrar
+                plt.figure(figsize=(20, 4), dpi=100)
+                plt.xticks(np.arange(0, len(final_unfiltered)+1, 150))
+                plt.plot(final_unfiltered)
+                plt.scatter(
+                    resultPeak, final_unfiltered[resultPeak], color='red', s=50, marker='*')
 
+                for i in resultPeak:
+                    # Plotting a vertical line
+                    plt.axvline(x=i, color='red')
 
-# cogemos las señales de ambos filtros, de la muestra inicial
+                plt.xlabel('Samples')
+                plt.ylabel('MLIImV')
+                plt.title("Localización de los picos R")
+                plt.show()
 
-# Filtro paso Alta
-plt.plot(highPass(unfiltered_signal), 'g')
-plt.title("ECG filtro Paso-Alta")
-plt.xlabel('Samples')
-plt.ylabel('MLIImV')
-plt.show()
+            # Pasamos a extraer el intervalo los puntos PQST utilizando la función ecg_delineate de neurokit2 para los resultados 
+            # finales extraidos
+            _, waves_peak = nk.ecg_delineate(sig[0:, 0],
+                                         {"ECG_R_Peaks": final_result},
+                                         360, method="dwt")
 
-# Filtro paso baja
-plt.plot(lowPass(unfiltered_signal), 'g')
-plt.title("ECG filtro Paso-Baja")
-plt.xlabel('Samples')
-plt.ylabel('MLIImV')
-plt.show()
+            # inicializamos la variable de entrada
+            beat = 0
 
-# Filtro de paso banda 
-filtered_ecg = bandPass(unfiltered_signal)
-plt.plot(filtered_ecg, 'g')
-plt.title("ECG filtro Paso-Banda")
-plt.xlabel('Samples')
-plt.ylabel('MLIImV')
-plt.show()
+            while beat != -1:
 
-# Derivación para eliminar para elimianr olas en componentes P y T del ECG
-diff = differentiation(filtered_ecg)
-plt.plot(diff, 'g')
-plt.title("ECG tras derivacion")
-plt.xlabel('Samples')
-plt.ylabel('MLIImV')
-plt.show()
+                print("\n¿Desea imprimir alguno de los latidos irregulares junto con sus métricas, en caso afirmativo indique uno de la lista?, en caso contrario indique -1\n") 
 
-# elevación al cuadrado
-sqrd=squared(diff)
-plt.plot(sqrd, 'g')
-plt.title("ECG señal tras elevación al cuadrado")
-plt.show()
+                for i in posAR:
+                    print(i)
 
-# Moving Window Integration (funcion de ecg-detectors)
-mwa = moving_window_integration(sqrd,  int(0.12 * fields['fs']))
-mwa[: int(0.2 * fields['fs'])] = 0
+                beat = int(input())
 
+                # mostramos las metricas y grafica
+                if beat != -1 and beat in posAR:
 
-
-# Procedemos a montar el detector
-# Buscamos los picos R con la clase heartrate
-hr = heart_rate(final_unfiltered, fields['fs'], mwa, filtered_ecg)
-result = hr.find_r_peaks()
-result = np.array(result)
-
-# Eliminamos los resultados donde la intensidad de la señal se menor que 0
-# puesto que se corresponde con el periodo de aprendizaje del algoritmo de picos
-for i in result:
-    if final_unfiltered[i] <= 0:
-        result = np.setdiff1d(result, i)
-
-# Mostramos los picos R en la señal sin filtrar
-plt.figure(figsize=(20, 4), dpi=100)
-plt.xticks(np.arange(0, len(final_unfiltered)+1, 150))
-plt.plot(final_unfiltered)
-plt.scatter(result, final_unfiltered[result], color='red', s=50, marker='*')
-plt.xlabel('Samples')
-plt.ylabel('MLIImV')
-plt.title("R Peak Locations")
-plt.show()
-
-# Se calculan los latidos
-heartRate = (60*fields['fs'])/np.average(np.diff(result[1:]))
-print(heartRate, "Latidos por minuto")
+                    secuence = sig[sig[final_result[beat]]-360:sig[final_result[beat]]+360, 0]
+                    # mostramos señal ecg sin filtrar
+                    plt.title("Señal del latido ",beat)
+                    plt.plot(secuence, 'g')
+                    plt.xlabel('Samples')
+                    plt.ylabel('MLIImV')
+                    plt.show()
+                    str_aux = "otra"
 
 
 
-# Pasamos a extraer el intervalo los puntos PQST utilizando la función ecg_delineate de neurokit2
-_, waves_peak = nk.ecg_delineate(sig[0:, 0],
-                                 {"ECG_R_Peaks": result},
-                                 360, method="dwt")
+    elif pacient_input != -1 :
+        print("\nEl paciente ", pacient_input, " no existe, elija uno correcto \n")
 
-# Pintamos los puntos caracteristicos TPQS
-nk.events_plot([waves_peak['ECG_T_Peaks'][:],
-                       waves_peak['ECG_P_Peaks'][:],
-                       waves_peak['ECG_Q_Peaks'][:],
-                waves_peak['ECG_S_Peaks'][:]], final_unfiltered[:4000])
 
-# Duracion de los QRS
-qrs_duration = QRS(waves_peak)
+
+
+
 
 # Duracion de RR
 RR_duration = RR(result)
+RR_duration = RR_duration / fields['fs']
 
 # Duracion segmento e intervalo ST
 st_interval= STinterval(waves_peak)
 st_segment = STsegment(waves_peak)
+
+pr_segment= PRsegment(waves_peak)
+pr_segment = pr_segment / fields['fs']
+
+
+
+
 
 
 
