@@ -1,23 +1,14 @@
 #%%
-import enum
-from signal import siginterrupt
 import wfdb
 import scipy.signal as sg
 import scipy.stats
-import shutil
-import os
 import numpy as np
-from IPython.display import display
 import matplotlib.pyplot as plt
-import matplotlib as mpl
-import pandas as pd
 import neurokit2 as nk
 from heartrate import heart_rate
 import warnings
-
 from tensorflow.python.keras.models import load_model
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 
 invalid_beat = [
     "[", "!", "]", "x", "(", ")", "p", "t",
@@ -36,29 +27,29 @@ warnings.filterwarnings(
 
 def bandPass(signal):
 
-    #filtro paso banda
-    fs = fields['fs']  # extraemos frecuencia
+    # Filtro paso banda
+    fs = fields['fs']  # Extraemos frecuencia
     nyquist_freq = 0.5 * fs
     f1 = 5/nyquist_freq  # Lowpass filtro paso baja
     f2 = 15/nyquist_freq  # Highpass filtro paso alta
-    # filtro banda que mezcla alta y baja
+    # Filtro banda que mezcla alta y baja
 
     # Pasamos el filtro Butterworth para pasar el paso banda y dejar la señal lo más plana posible
     b, a = sg.butter(1, [f1*2, f2*2], btype='bandpass')
-    # cogemos las señales de ambos filtros, de la muestra inicial
+    # Cogemos las señales de ambos filtros, de la muestra inicial
     filtered_ecg = sg.lfilter(b, a, signal)
     
     return filtered_ecg
 
 def lowPass(signal):
 
-    #filtro paso baja
-    fs = 360  # extraemos frecuencia
+    # Filtro paso baja
+    fs = 360  # Extraemos frecuencia
     nyquist_freq = 0.5 * fs
     f1 = 5/nyquist_freq  # Lowpass filtro paso baja
-    # filtro banda que mezcla alta y baja
+    # Filtro banda que mezcla alta y baja
 
-    #filtro paso baja
+    # Filtro paso baja
     b, a = sg.butter(1, f1*2, 'lowpass')
     filtered_ecg = sg.filtfilt(b, a, unfiltered_signal)
 
@@ -66,8 +57,8 @@ def lowPass(signal):
 
 def highPass(signal):
 
-    #filtro paso alta
-    fs = 360  # extraemos frecuencia
+    # Filtro paso alta
+    fs = 360  # Extraemos frecuencia
     nyquist_freq = 0.5 * fs
     f2 = 15/nyquist_freq  # Highpass filtro paso alta
 
@@ -81,7 +72,7 @@ def differentiation(signal):
     return np.diff(signal)
 
 def squared(signal):
-    #realizamos el cuadrado de la señal
+    # Realizamos el cuadrado de la señal
     return signal*signal
 
 def moving_window_integration(signal, window_size, **kwargs):
@@ -127,9 +118,9 @@ def RR(r_peak):
     
 def QRS(waves):
 
-    post_p = np.array(waves["ECG_R_Onsets"])
-    pre_t = np.array(waves["ECG_R_Offsets"])
-    qrs_duration = pre_t - post_p
+    pre_r = np.array(waves["ECG_R_Onsets"])
+    post_r = np.array(waves["ECG_R_Offsets"])
+    qrs_duration = post_r - pre_r
 
     return qrs_duration
 
@@ -161,7 +152,6 @@ def PRinterval(waves):
 
     pre_p = np.array(waves["ECG_P_Onsets"])
     post_p = np.array(waves["ECG_P_Offsets"])
-    pre_q = np.array(waves["ECG_R_Onsets"])
     p_duration = post_p - pre_p
 
     pr_interval = PRsegment(waves) + p_duration
@@ -184,7 +174,7 @@ def classifyBeat(symbol):
     elif symbol == "N" or symbol == ".":
         return 0
 
-def build_dataset(all_sequences):
+def buildDataset(all_sequences):
     sequences = []
     
     for i in all_sequences:
@@ -192,12 +182,12 @@ def build_dataset(all_sequences):
 
     return np.vstack(sequences)
 
-# ajustamos el tamaño de la gráfica
+# Ajustamos el tamaño de la gráfica
 plt.rcParams['figure.figsize'] = [15, 4] 
 
 print("\n Bienvenido a ARdetector! \n")
 
-# cargamos los pacientes existentes en la bbdd
+# Cargamos los pacientes existentes en la bbdd
 pacient = np.loadtxt(
     "sample-data/mit-bih-arrhythmia-database-1.0.0/RECORDS", dtype=int)
 pacient_list=list(pacient)
@@ -223,11 +213,11 @@ while pacient_input != -1 or pacient_input != -1:
         print("El total de muestras es ", fields['sig_len'])
 
         
-        # leemos la señal de inicio a fin de la primera columna
+        # Leemos la señal de inicio a fin de la primera columna
         unfiltered_signal = sig[:, 0]
         final_unfiltered = unfiltered_signal
 
-        # operaciones de filtrado de señal
+        # Operaciones de filtrado de señal
         filtered_ecg = bandPass(unfiltered_signal)
         diff = differentiation(filtered_ecg)
         sqrd = squared(diff)
@@ -242,7 +232,7 @@ while pacient_input != -1 or pacient_input != -1:
             show = int(input())   
 
             if show == 1:
-                # cargamos el  vector a imprimir y el formato
+                # Cargamos el  vector a imprimir y el formato
                 plt.title("Señal sin filtrar de ECG")
                 plt.plot(final_unfiltered, 'g')
                 plt.xlabel('Samples')
@@ -251,7 +241,7 @@ while pacient_input != -1 or pacient_input != -1:
                 str_aux = "otra"
 
             if show == 2:
-                # filtro de paso banda
+                # Filtro de paso banda
                 plt.plot(filtered_ecg, 'g')
                 plt.title("ECG filtro Paso-Banda")
                 plt.xlabel('Samples')
@@ -261,7 +251,7 @@ while pacient_input != -1 or pacient_input != -1:
 
 
             if show == 3:
-                # derivación para eliminar para elimianr olas en componentes P y T del ECG
+                # Derivacion para eliminar para elimianr olas en componentes P y T del ECG
                 plt.plot(diff, 'g')
                 plt.title("ECG tras derivacion")
                 plt.xlabel('Samples')
@@ -271,7 +261,7 @@ while pacient_input != -1 or pacient_input != -1:
                 
             if show == 4:
 
-                # elevación al cuadrado
+                # Elevacion al cuadrado
                 plt.plot(sqrd, 'g')
                 plt.title("ECG señal tras elevación al cuadrado")
                 plt.show()
@@ -304,9 +294,7 @@ while pacient_input != -1 or pacient_input != -1:
                 result = np.setdiff1d(result, i)
 
         
-        # Se calculan los latidos
-        heartRate = (60*fields['fs'])/np.average(np.diff(result[1:]))
-        print("\nLatidos por minuto en media --> ", heartRate)
+        
 
         # Se calcula la duración media del QRS
         # Pasamos a extraer el intervalo los puntos PQST utilizando la función ecg_delineate de neurokit2
@@ -314,20 +302,48 @@ while pacient_input != -1 or pacient_input != -1:
                                 {"ECG_R_Peaks": result},
                                 360, method="dwt")
 
-        # duracion media de QRS ---
+        # Se calculan los latidos
+        heartRate = (60*fields['fs'])/np.average(np.diff(result[1:]))
+        print("\nLatidos por minuto en media --> ", heartRate,' lpm')
+
+        # Se calcula la duración media del intervalo RR
+        RRdiff = RR(result) 
+        RRmean = np.nanmean(RRdiff) / fields['fs']
+        print("\nDuración media RR en        --> ", RRmean*1000,' ms')
+
+        # Duracion media de QRS ---
         qrs_duration = QRS(waves_peak)
         np.delete(qrs_duration, qrs_duration.size -1)
+       
         # Se calcula la media de QRS
-        
         qrsMean = np.nanmean(qrs_duration) / fields['fs']
-        print("\nDuración media QRS en ms --> ", qrsMean*1000)
+        print("\nDuración media QRS en ms    --> ", qrsMean*1000), ' ms'
+
+        # Se calcula la duración media del segmento ST
+        STsegdiff = STsegment(waves_peak)
+        STsegmean = np.nanmean(STsegdiff) / fields['fs']
+        print("\nDuración media segmento ST  --> ", STsegmean*1000, ' ms')
+
+        # Se calcula la duración media del intervalo ST
+        STintdiff = STinterval(waves_peak)
+        STintmean = np.nanmean(STintdiff) / fields['fs']
+        print("\nDuración media intervalo ST  --> ", STintmean*1000, ' ms')
+
+        # Se calcula la duración media del segmento PR
+        PRsegdiff = PRsegment(waves_peak)
+        PRsegmean = np.nanmean(PRsegdiff) / fields['fs']
+        print("\nDuración media segmento PR  --> ", PRsegmean*1000, ' ms')
+
+        # Se calcula la duración media del intervalo PR
+        PRintdiff = PRinterval(waves_peak)
+        PRintmean = np.nanmean(PRintdiff) / fields['fs']
+        print("\nDuración media intervalo PR  --> ", PRintmean*1000, ' ms')
 
         show = 0
-
         while show != -1:
 
             print("\n¿Desea imprimir ", str_aux,
-                  " de las siguiente gráficas de filtrado de señal?, si no pulse -1\n \n1)- Localización de los picos R\n 2)- Puntos caracteristicos TPQS\n")
+                  " de las siguiente gráficas de filtrado de señal?, si no pulse -1\n \n1)- Localización de los picos R\n2)- Puntos caracteristicos TPQS\n")
             show = int(input())
 
             if show == 1:
@@ -355,7 +371,7 @@ while pacient_input != -1 or pacient_input != -1:
 
                 print("\nPor favor introduzca una opción correcta\n")
 
-        print("\nAplicamos la red neuronal CNN a la señal...")
+        print("\nAplicamos la red neuronal CNN a la señal...\n")
 
         # Calsificador cnn
         record = wfdb.rdrecord(
@@ -370,23 +386,23 @@ while pacient_input != -1 or pacient_input != -1:
         scaler = StandardScaler()
         signal = scaler.fit_transform(record.p_signal)
         all_sequences = []
-        # resultados una vez quitados los que no se pueden extraer
+        # Resultados una vez quitados los que no se pueden extraer
         final_result = []
 
-        # llamamos a crear la secuecia de latidos con los picos R extraidos
+        # Llamamos a crear la secuecia de latidos con los picos R extraidos
         for i,i_sample in enumerate(result):
             sequence = getSequence(signal, i_sample, 3, 360)
             if sequence.size > 0:
                 all_sequences.append(sequence)
                 final_result.append(i_sample)
 
-        # contruimos la estructura de datos para informar la red cnn        
-        dataset = build_dataset(all_sequences)
+        # Construimos la estructura de datos para informar la red cnn        
+        dataset = buildDataset(all_sequences)
 
-        # predecimos con el modelo previamente entrenado
+        # Predecimos con el modelo previamente entrenado
         arreglo = cnn.predict(dataset)
         
-        # extraemos las posiciones dónde la probabilidad de arritmia es mayor de 0.5
+        # Extraemos las posiciones dónde la probabilidad de arritmia es mayor de 0.5
         posAR=[]
 
         for i in arreglo:
@@ -396,7 +412,7 @@ while pacient_input != -1 or pacient_input != -1:
         print('\nLos latidos en los que se pueden encontrar anomalias son: \n')
 
     
-        # picos r de latidos anormales
+        # Picos r de latidos anormales
         resultPeak = []
         for i in posAR:
             print('\n Latido nº', i[0], " secuencia -> ", final_result[i[0]])
@@ -432,59 +448,61 @@ while pacient_input != -1 or pacient_input != -1:
 
             # Pasamos a extraer el intervalo los puntos PQST utilizando la función ecg_delineate de neurokit2 para los resultados 
             # finales extraidos
+
+            print('\n...Cargando datos...\n')
             _, waves_peak = nk.ecg_delineate(sig[0:, 0],
                                          {"ECG_R_Peaks": final_result},
                                          360, method="dwt")
 
-            # inicializamos la variable de entrada
+            # Inicializamos la variable de entrada
             beat = 0
 
             while beat != -1:
 
-                print("\n¿Desea imprimir alguno de los latidos irregulares junto con sus métricas, en caso afirmativo indique uno de la lista?, en caso contrario indique -1\n") 
+                print("\n¿Desea imprimir alguno de los latidos irregulares junto con sus métricas? En caso afirmativo indique uno de la lista, en caso contrario indique -1\n") 
 
                 for i in posAR:
                     print(i)
 
+                print('\n')
                 beat = int(input())
 
-                # mostramos las metricas y grafica
+                # Mostramos las metricas y grafica
                 if beat != -1 and beat in posAR:
 
-                    secuence = sig[sig[final_result[beat]]-360:sig[final_result[beat]]+360, 0]
-                    # mostramos señal ecg sin filtrar
-                    plt.title("Señal del latido ",beat)
+                    print('\nLas metricas del latido indicado son:\n')
+
+                    print('\nDuración QRS          --> ',
+                          (waves_peak["ECG_R_Offsets"][beat]-waves_peak["ECG_R_Onsets"][beat])/360 * 1000, ' ms')
+
+                    print('\nDuración segmento ST  --> ',
+                          (waves_peak["ECG_T_Onsets"][beat]-waves_peak["ECG_R_Offsets"][beat])/360 * 1000, ' ms')
+
+                    print('\nDuración intervalo ST --> ',
+                          (waves_peak["ECG_T_Offsets"][beat]-waves_peak["ECG_R_Offsets"][beat])/360 * 1000, ' ms')
+
+                    
+                    if not np.isnan(waves_peak["ECG_P_Peaks"][beat]):
+                        print('\nDuración segmento PR  --> ',
+                              ( - waves_peak["ECG_P_Offsets"][beat] + waves_peak["ECG_R_Onsets"][beat])/360 * 1000, ' ms')
+
+                        print('\nDuración intervalo PR --> ',
+                          ( - waves_peak["ECG_P_Onsets"][beat]+waves_peak["ECG_R_Onsets"][beat])/360 * 1000, ' ms')
+                    else:
+                        print('\nNo hay presencia de onda P\n')
+                  
+                    secuence = sig[final_result[beat]-360:final_result[beat]+360,0]
+                    # Mostramos señal ecg sin filtrar
+                    plt.title("Señal del latido indicado")
                     plt.plot(secuence, 'g')
                     plt.xlabel('Samples')
                     plt.ylabel('MLIImV')
                     plt.show()
-                    str_aux = "otra"
 
 
 
     elif pacient_input != -1 :
         print("\nEl paciente ", pacient_input, " no existe, elija uno correcto \n")
-
-
-
-
-
-
-# Duracion de RR
-RR_duration = RR(result)
-RR_duration = RR_duration / fields['fs']
-
-# Duracion segmento e intervalo ST
-st_interval= STinterval(waves_peak)
-st_segment = STsegment(waves_peak)
-
-pr_segment= PRsegment(waves_peak)
-pr_segment = pr_segment / fields['fs']
-
-
-
-
-
 
 
 
