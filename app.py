@@ -28,12 +28,14 @@ warnings.filterwarnings(
 def bandPass(signal):
 
     # Filtro paso banda
-    fs = fields['fs']  # Extraemos frecuencia
-    nyquist_freq = 0.5 * fs
-    f1 = 5/nyquist_freq  # Lowpass filtro paso baja
-    f2 = 15/nyquist_freq  # Highpass filtro paso alta
+    # Extraemos frecuencia
+    fs = fields['fs']  
+    freq = 0.5 * fs
+    # Lowpass filtro paso baja
+    f1 = 5/freq  
+    # Highpass filtro paso alta
+    f2 = 15/freq  
     # Filtro banda que mezcla alta y baja
-
     # Pasamos el filtro Butterworth para pasar el paso banda y dejar la señal lo más plana posible
     b, a = sg.butter(1, [f1*2, f2*2], btype='bandpass')
     # Cogemos las señales de ambos filtros, de la muestra inicial
@@ -106,6 +108,8 @@ def moving_window_integration(signal, window_size, **kwargs):
 
     return mwa
 
+
+
 def RR(r_peak):
     
     RR_duration = [np.nan]
@@ -174,7 +178,7 @@ def classifyBeat(symbol):
     elif symbol == "N" or symbol == ".":
         return 0
 
-def buildDataset(all_sequences):
+def buildData(all_sequences):
     sequences = []
     
     for i in all_sequences:
@@ -204,7 +208,7 @@ while pacient_input != -1 or pacient_input != -1:
         # rdsamp es un elemento de la biblioteca wfdb para leer la señal
         sig, fields = wfdb.rdsamp(
             f'sample-data/mit-bih-arrhythmia-database-1.0.0/{pacient_input}')
-
+        # rdann es un elemento de la biblioteca wfdb para leer las anotaciones de la señal
         annotation = wfdb.rdann(
             f'sample-data/mit-bih-arrhythmia-database-1.0.0/{pacient_input}', 'atr')
 
@@ -280,7 +284,7 @@ while pacient_input != -1 or pacient_input != -1:
 
 
         # Procedemos a montar el detector
-        # Buscamos los picos R con la clase heartrate
+        # Buscamos los picos R 
         hr = heart_rate(final_unfiltered, fields['fs'], mwa, filtered_ecg)
         result = hr.find_r_peaks()
         result = list(set(result))
@@ -389,15 +393,24 @@ while pacient_input != -1 or pacient_input != -1:
         # Resultados una vez quitados los que no se pueden extraer
         final_result = []
 
+        # Cargamos las anotaciones de los latidos para analizar los resultados
+        atr_symbol = annotation.symbol
+        all_beat = []
+
         # Llamamos a crear la secuecia de latidos con los picos R extraidos
         for i,i_sample in enumerate(result):
+            type_beat = classifyBeat(atr_symbol[i])
             sequence = getSequence(signal, i_sample, 3, 360)
+
+            if type_beat is not None and sequence.size > 0:
+                all_beat.append(type_beat)
+                
             if sequence.size > 0:
                 all_sequences.append(sequence)
                 final_result.append(i_sample)
 
         # Construimos la estructura de datos para informar la red cnn        
-        dataset = buildDataset(all_sequences)
+        dataset = buildData(all_sequences)
 
         # Predecimos con el modelo previamente entrenado
         arreglo = cnn.predict(dataset)

@@ -5,10 +5,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.layers import Dropout, Flatten, Dense, Conv1D
+from tensorflow.python.keras.layers import Dropout, Flatten, Dense, Conv1D, MaxPooling1D
+
 from tensorflow.python.keras.optimizer_v2 import adam
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+
 
 
 invalid_beat = [
@@ -105,7 +108,7 @@ for subject in pacient:
 subject_map = pd.DataFrame(subject_map)
 
 # Estandarizamos los resultados del porcentaje de latidos iregulares para extraer posteriormente
-# cojuntos de datos homogeneos con los de validacion
+# Conjuntos de datos homogeneos con los de validacion
 bins = [0, 0.2, 0.6, 1.0]
 subject_map["bin"] = pd.cut(
     subject_map['porcentaje'], bins=bins, labels=False, include_lowest=True)
@@ -123,13 +126,17 @@ X_train.shape, y_train.shape
 
 cnn_model = Sequential([
     Conv1D(
-        filters=8,
+        filters=10,
         kernel_size=4,
         strides=1,
         input_shape=(X_train.shape[1], 1),
         padding="same",
         activation="relu"
     ),
+    Conv1D(20, 4, activation="relu"),
+    MaxPooling1D(3),
+    Conv1D(10, 4, activation="relu"),
+    MaxPooling1D(2),
     Flatten(),
     Dropout(0.5),
     Dense(
@@ -162,6 +169,7 @@ trained_cnn = cnn_model.fit(
 scores=cnn_model.evaluate(X_val, y_val)
 print("\n%s: %.2f%%" % (cnn_model.metrics_names[1], scores[1]*100))
 arreglo = cnn_model.predict(X_val)
+
 
 
 # Mostramos grafica de precision
